@@ -1,0 +1,86 @@
+# vim: ts=2 sw=2 sts=2 et:
+
+containers:
+  ghcbase:
+    setup:
+    - !Ubuntu trusty
+    - !Install [ca-certificates, wget, build-essential, libgmp10:amd64, libgmp-dev:amd64]
+
+    # git (just in case we need it)
+    - !Install [git]
+
+    # GHC 7.10.1
+    - !Sh |
+       set -ex
+       cd /tmp
+       wget https://www.haskell.org/ghc/dist/7.10.1/ghc-7.10.1-x86_64-unknown-linux-deb7.tar.bz2
+       tar -jxvf ghc-7.10.1-x86_64-unknown-linux-deb7.tar.bz2
+       cd ghc-7.10.1
+       ./configure --prefix=/usr/local && make install
+       cd /tmp
+       rm -fv ghc-7.10.1-x86_64-unknown-linux-deb7.tar.bz2
+       rm -rfv ghc-7.10.1
+
+    # Needed for cabal-install to work properly
+    - !Env
+      HOME: /root
+
+    # Cabal library
+    - !Sh |
+       set -ex
+       cd /tmp
+       wget https://www.haskell.org/cabal/release/cabal-1.22.3.0/Cabal-1.22.3.0.tar.gz
+       tar -zxvf Cabal-1.22.3.0.tar.gz
+       cd Cabal-1.22.3.0
+       ghc --make Setup.hs
+       ./Setup configure --global
+       ./Setup build
+       ./Setup install
+       cd /tmp
+       rm -fv Cabal-1.22.3.0.tar.gz
+       rm -rfv Cabal-1.22.3.0
+
+    # cabal-install tool
+    - !Install [zlib1g-dev]
+    - !Sh |
+       set -ex
+       cd /tmp
+       wget https://www.haskell.org/cabal/release/cabal-install-1.22.3.0/cabal-install-1.22.3.0.tar.gz
+       tar -zxvf cabal-install-1.22.3.0.tar.gz
+       cd cabal-install-1.22.3.0
+       ./bootstrap.sh --global
+       cd /tmp
+       rm -fv cabal-install-1.22.3.0.tar.gz
+       rm -rfv cabal-install-1.22.3.0
+
+  dev:
+    setup:
+    - !Container ghcbase
+
+    # Needed for cabal-install to work properly
+    - !Env
+      HOME: /root
+
+    # Install dependencies that we need
+    - !Sh |
+       set -ex
+       cabal update
+       cabal install --global --only-dependencies
+
+    # If the `build-depends` in the cabal file changes, the container should be rebuilt
+    - !Depends serverer.cabal
+
+    # hdevtools (for development only)
+    - !Sh |
+       set -ex
+       cd /tmp
+       git clone https://github.com/bitc/hdevtools.git
+       cd hdevtools
+       cabal install --global
+       cd /tmp
+       rm -rfv hdevtools
+
+    environ:
+      HOME: /tmp
+
+commands:
