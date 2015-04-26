@@ -74,7 +74,7 @@ containers:
     - !Sh |
        set -ex
        cd /tmp
-       git clone https://github.com/bitc/hdevtools.git
+       git clone --depth 1 https://github.com/bitc/hdevtools.git
        cd hdevtools
        cabal install --global
        cd /tmp
