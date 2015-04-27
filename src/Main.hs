@@ -12,16 +12,36 @@ import qualified Network.Wai.Handler.WebSockets as WaiWS
 import qualified Network.WebSockets as WS
 import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString
-import Control.Monad (void)
+import Control.Concurrent (MVar, modifyMVar_, newMVar, readMVar)
+import Control.Exception (finally)
+import Control.Monad (forM_, void)
 import Data.Conduit
-import Data.Conduit.List
+import Data.Conduit.List (mapAccum)
 import Data.FileEmbed (embedDir)
 import Data.FileEmbed (embedFile)
+import Data.Unique (Unique, newUnique)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
 import Network.HTTP.Types (status200)
 
 import HttpUtils (isHtmlResponse)
 import ByteStringUtils (byteStringToLower)
+
+type Client = (Unique, WS.Connection)
+
+type ServerState = [Client]
+
+newServerState :: ServerState
+newServerState = []
+
+addClient :: Client -> ServerState -> ServerState
+addClient client clients = client : clients
+
+removeClient :: Client -> ServerState -> ServerState
+removeClient client = filter ((/= fst client) . fst)
+
+broadcastReload :: ServerState -> IO ()
+broadcastReload clients = do
+    forM_ clients $ \(_, conn) -> WS.sendTextData conn ("reload" :: T.Text)
 
 main :: IO ()
 main = do
@@ -30,19 +50,21 @@ main = do
     let settings = (Warp.setHost "0.0.0.0")
             . (Warp.setPort 8000) $ Warp.defaultSettings
 
+    state <- newMVar newServerState
+
     withManager defaultManagerSettings $ \manager ->
         Warp.runSettings settings $
-            WaiWS.websocketsOr WS.defaultConnectionOptions wsApp (reverseProxy manager)
+            WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp state) (reverseProxy state manager)
 
 proxyDest :: RP.ProxyDest
 proxyDest = RP.ProxyDest "localhost" 8800
 
-reverseProxy :: Manager -> Network.Wai.Application
-reverseProxy manager = RP.waiProxyToSettings getDest settings manager
+reverseProxy :: MVar ServerState -> Manager -> Network.Wai.Application
+reverseProxy state manager = RP.waiProxyToSettings getDest settings manager
     where
     getDest :: Network.Wai.Request -> IO RP.WaiProxyResponse
     getDest req
-        | Network.Wai.pathInfo req == ["__reload"] = return $ RP.WPRApplication reloadHandler
+        | Network.Wai.pathInfo req == ["__reload"] = return $ RP.WPRApplication (reloadHandler state)
         | otherwise = return $ RP.WPRProxyDest proxyDest
     settings :: RP.WaiProxySettings
     settings = RP.def { RP.wpsProcessBody = processBody }
@@ -51,9 +73,9 @@ reverseProxy manager = RP.waiProxyToSettings getDest settings manager
         | isHtmlResponse response = Just injectScript
         | otherwise = Nothing
 
-reloadHandler :: Network.Wai.Application
-reloadHandler _ respond = do
-    putStrLn "reload!!!"
+reloadHandler :: MVar ServerState -> Network.Wai.Application
+reloadHandler state _ respond = do
+    readMVar state >>= broadcastReload
     respond $ Network.Wai.responseLBS status200 [] "Triggered Reload"
 
 script :: BS.ByteString
@@ -101,8 +123,23 @@ injectScript =
 staticApp :: Network.Wai.Application
 staticApp = Static.staticApp $ Static.embeddedSettings $(embedDir "static")
 
-wsApp :: WS.ServerApp
-wsApp pending = do
+wsApp :: MVar ServerState -> WS.ServerApp
+wsApp state pending = do
     conn <- WS.acceptRequest pending
     WS.forkPingThread conn 30
-    WS.sendTextData conn ("wassup there!" :: T.Text)
+    newId <- newUnique
+    let client = (newId, conn)
+        disconnect = do
+            modifyMVar_ state $ \s -> do
+                let s' = removeClient client s
+                return s'
+    flip finally disconnect $ do
+        modifyMVar_ state $ \s -> do
+            let s' = addClient client s
+            return s'
+        clientWait conn
+
+clientWait :: WS.Connection -> IO ()
+clientWait conn = do
+    _ <- (WS.receiveData conn) :: IO BS.ByteString
+    clientWait conn
