@@ -1,4 +1,13 @@
 (function() {
-    /* TODO */
-    alert('injected!');
+    function createWebSocket(path) {
+        var uri = 'ws://' + window.location.host + path;
+        var Socket = "MozWebSocket" in window ? MozWebSocket : WebSocket;
+        return new Socket(uri);
+    }
+
+    var ws = createWebSocket('/__listen');
+
+    ws.onmessage = function(event) {
+        location.reload(true);
+    };
 })();
