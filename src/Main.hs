@@ -16,6 +16,7 @@ import Control.Monad (void)
 import Data.Conduit
 import Data.Conduit.List
 import Data.FileEmbed (embedDir)
+import Data.FileEmbed (embedFile)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
 
 import HttpUtils (isHtmlResponse)
@@ -47,12 +48,29 @@ reverseProxy manager = RP.waiProxyToSettings getDest settings manager
         | isHtmlResponse response = Just injectScript
         | otherwise = Nothing
 
+script :: BS.ByteString
+script = $(embedFile "src/script.js")
+
+stripNewlines :: BS.ByteString -> BS.ByteString
+stripNewlines source =
+    BS.foldl go BS.empty source
+    where
+    go built char
+        | char == fromIntegral (fromEnum '\n') = built
+        | otherwise = built `BS.snoc` char
+
+injection :: BS.ByteString
+injection = BS.concat
+    [ "<!-- BEGIN INJECTION by serverer --><script type=\"text/javascript\">"
+    , stripNewlines script
+    , "</script><!-- END INJECTION -->"
+    ]
+
 injectScript :: Conduit BS.ByteString IO (Flush Builder)
 injectScript =
     void $ mapAccum doChunk (Just headTag)
     where
     headTag = "<head>"
-    injection = "<!-- FOOBAR -->"
     -- TODO `doChunk` has a bug where it won't handle the case where `headTag`
     -- happens to be split between two input chunks. (This should be pretty
     -- rare in practice since the tag usually appears very near the beginning
