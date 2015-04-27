@@ -6,7 +6,6 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Network.HTTP.ReverseProxy as RP
 import qualified Network.Wai
-import qualified Network.Wai.Application.Static as Static
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Handler.WebSockets as WaiWS
 import qualified Network.WebSockets as WS
@@ -17,7 +16,6 @@ import Control.Exception (finally)
 import Control.Monad (forM_, void)
 import Data.Conduit
 import Data.Conduit.List (mapAccum)
-import Data.FileEmbed (embedDir)
 import Data.FileEmbed (embedFile)
 import Data.Unique (Unique, newUnique)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
@@ -119,9 +117,6 @@ injectScript =
                             [ fromByteString start
                             , fromByteString injection
                             , fromByteString end ])
-
-staticApp :: Network.Wai.Application
-staticApp = Static.staticApp $ Static.embeddedSettings $(embedDir "static")
 
 wsApp :: MVar ServerState -> WS.ServerApp
 wsApp state pending = do
