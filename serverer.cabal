@@ -21,8 +21,15 @@ executable serverer
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.8 && <4.9,
+                       bytestring,
                        text,
+                       case-insensitive,
+                       blaze-builder == 0.4.0.1,
+                       conduit == 1.2.4,
                        file-embed == 0.0.8.2,
+                       http-client == 0.4.11.1,
+                       http-reverse-proxy == 0.4.1.2,
+                       http-types == 0.8.6,
                        wai == 3.0.2.3,
                        wai-app-static == 3.0.1,
                        wai-websockets == 3.0.0.5,
