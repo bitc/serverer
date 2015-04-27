@@ -2,6 +2,7 @@
 
 module Main where
 
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Network.HTTP.ReverseProxy as RP
 import qualified Network.Wai
@@ -10,14 +11,15 @@ import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Handler.WebSockets as WaiWS
 import qualified Network.WebSockets as WS
 import Blaze.ByteString.Builder (Builder)
-import Data.ByteString (ByteString)
-import Data.Conduit (Conduit, Flush)
+import Blaze.ByteString.Builder.ByteString
+import Control.Monad (void)
+import Data.Conduit
+import Data.Conduit.List
 import Data.FileEmbed (embedDir)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
 
 import HttpUtils (isHtmlResponse)
-
-import Debug.Trace
+import ByteStringUtils (byteStringToLower)
 
 main :: IO ()
 main = do
@@ -40,10 +42,35 @@ reverseProxy manager = RP.waiProxyToSettings getDest settings manager
     getDest _ = return $ RP.WPRProxyDest proxyDest
     settings :: RP.WaiProxySettings
     settings = RP.def { RP.wpsProcessBody = processBody }
-    processBody :: Response () -> Maybe (Conduit ByteString IO (Flush Builder))
+    processBody :: Response () -> Maybe (Conduit BS.ByteString IO (Flush Builder))
     processBody response
-        | isHtmlResponse response = trace (show response) (error "TODO")
+        | isHtmlResponse response = Just injectScript
         | otherwise = Nothing
+
+injectScript :: Conduit BS.ByteString IO (Flush Builder)
+injectScript =
+    void $ mapAccum doChunk (Just headTag)
+    where
+    headTag = "<head>"
+    injection = "<!-- FOOBAR -->"
+    -- TODO `doChunk` has a bug where it won't handle the case where `headTag`
+    -- happens to be split between two input chunks. (This should be pretty
+    -- rare in practice since the tag usually appears very near the beginning
+    -- of the document and chunks are supposed to be pretty large)
+    doChunk :: BS.ByteString -> Maybe BS.ByteString -> (Maybe BS.ByteString, Flush Builder)
+    doChunk chunk Nothing = (Nothing, Chunk (fromByteString chunk))
+    doChunk chunk (Just _) =
+        let chunkLower = byteStringToLower chunk
+        in case BS.breakSubstring headTag chunkLower of
+            (x, y)  | BS.null y -> (Just headTag, Chunk (fromByteString chunk))
+                    | otherwise ->
+                        let index = BS.length x + BS.length headTag
+                            start = BS.take index chunk
+                            end = BS.drop index chunk
+                        in (Nothing, Chunk $ mconcat
+                            [ fromByteString start
+                            , fromByteString injection
+                            , fromByteString end ])
 
 staticApp :: Network.Wai.Application
 staticApp = Static.staticApp $ Static.embeddedSettings $(embedDir "static")
