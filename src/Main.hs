@@ -18,6 +18,7 @@ import Data.Conduit.List
 import Data.FileEmbed (embedDir)
 import Data.FileEmbed (embedFile)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
+import Network.HTTP.Types (status200)
 
 import HttpUtils (isHtmlResponse)
 import ByteStringUtils (byteStringToLower)
@@ -40,13 +41,20 @@ reverseProxy :: Manager -> Network.Wai.Application
 reverseProxy manager = RP.waiProxyToSettings getDest settings manager
     where
     getDest :: Network.Wai.Request -> IO RP.WaiProxyResponse
-    getDest _ = return $ RP.WPRProxyDest proxyDest
+    getDest req
+        | Network.Wai.pathInfo req == ["__reload"] = return $ RP.WPRApplication reloadHandler
+        | otherwise = return $ RP.WPRProxyDest proxyDest
     settings :: RP.WaiProxySettings
     settings = RP.def { RP.wpsProcessBody = processBody }
     processBody :: Response () -> Maybe (Conduit BS.ByteString IO (Flush Builder))
     processBody response
         | isHtmlResponse response = Just injectScript
         | otherwise = Nothing
+
+reloadHandler :: Network.Wai.Application
+reloadHandler _ respond = do
+    putStrLn "reload!!!"
+    respond $ Network.Wai.responseLBS status200 [] "Triggered Reload"
 
 script :: BS.ByteString
 script = $(embedFile "src/script.js")
