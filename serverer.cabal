@@ -30,6 +30,7 @@ executable serverer
                        http-client == 0.4.11.1,
                        http-reverse-proxy == 0.4.1.2,
                        http-types == 0.8.6,
+                       optparse-applicative == 0.11.0.2,
                        wai == 3.0.2.3,
                        wai-app-static == 3.0.1,
                        wai-websockets == 3.0.0.5,

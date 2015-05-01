@@ -17,12 +17,37 @@ import Control.Monad (forM_, void)
 import Data.Conduit
 import Data.Conduit.List (mapAccum)
 import Data.FileEmbed (embedFile)
+import Data.String (fromString)
 import Data.Unique (Unique, newUnique)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
 import Network.HTTP.Types (status200)
+import Options.Applicative
 
 import HttpUtils (isHtmlResponse)
 import ByteStringUtils (byteStringToLower)
+
+defaultHost :: String
+defaultHost = "0.0.0.0"
+
+defaultPort :: Int
+defaultPort = 8808
+
+defaultRemotePort :: Int
+defaultRemotePort = 80
+
+data Options = Options
+    { host :: String
+    , port :: Int
+    , remoteHost :: String
+    , remotePort :: Int
+    }
+
+parseOptions :: Parser Options
+parseOptions = Options
+    <$> strOption (long "host" <> metavar "HOST" <> value defaultHost <> help "host to listen on")
+    <*> option auto (long "port" <> metavar "PORT" <> value defaultPort <> help "port to listen on")
+    <*> strOption (long "remote-host" <> metavar "REMOTEHOST" <> help "host of destination server that should be proxied to")
+    <*> option auto (long "remote-port" <> metavar "REMOTEPORT" <> value defaultRemotePort <> help "port of destination server that should be proxied to")
 
 type Client = (Unique, WS.Connection)
 
@@ -43,27 +68,32 @@ broadcastReload clients = do
 
 main :: IO ()
 main = do
-    putStrLn "Starting..."
+    execParser opts >>= runWithOptions
 
-    let settings = (Warp.setHost "0.0.0.0")
-            . (Warp.setPort 8000) $ Warp.defaultSettings
+    where
+    opts = info (helper <*> parseOptions)
+        (fullDesc <> header "serverer - Development web server with live reload")
+
+runWithOptions :: Options -> IO ()
+runWithOptions opts = do
+    putStrLn $ "Listening on " ++ host opts ++ ":" ++ show (port opts) ++ "..."
+
+    let settings = (Warp.setHost (fromString (host opts)))
+            . (Warp.setPort (port opts)) $ Warp.defaultSettings
 
     state <- newMVar newServerState
 
     withManager defaultManagerSettings $ \manager ->
         Warp.runSettings settings $
-            WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp state) (reverseProxy state manager)
+            WaiWS.websocketsOr WS.defaultConnectionOptions (wsApp state) (reverseProxy (remoteHost opts) (remotePort opts) state manager)
 
-proxyDest :: RP.ProxyDest
-proxyDest = RP.ProxyDest "localhost" 8800
-
-reverseProxy :: MVar ServerState -> Manager -> Network.Wai.Application
-reverseProxy state manager = RP.waiProxyToSettings getDest settings manager
+reverseProxy :: String -> Int -> MVar ServerState -> Manager -> Network.Wai.Application
+reverseProxy proxyHost proxyPort state manager = RP.waiProxyToSettings getDest settings manager
     where
     getDest :: Network.Wai.Request -> IO RP.WaiProxyResponse
     getDest req
         | Network.Wai.pathInfo req == ["__reload"] = return $ RP.WPRApplication (reloadHandler state)
-        | otherwise = return $ RP.WPRProxyDest proxyDest
+        | otherwise = return $ RP.WPRProxyDest (RP.ProxyDest (fromString proxyHost) proxyPort)
     settings :: RP.WaiProxySettings
     settings = RP.def { RP.wpsProcessBody = processBody }
     processBody :: Response () -> Maybe (Conduit BS.ByteString IO (Flush Builder))
