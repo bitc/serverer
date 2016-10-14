@@ -17,6 +17,7 @@ import Control.Monad (forM_, void)
 import Data.Conduit
 import Data.Conduit.List (mapAccum)
 import Data.FileEmbed (embedFile)
+import Data.Monoid ((<>))
 import Data.String (fromString)
 import Data.Unique (Unique, newUnique)
 import Network.HTTP.Client (Manager, Response, withManager, defaultManagerSettings)
