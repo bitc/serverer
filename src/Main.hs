@@ -63,9 +63,9 @@ addClient client clients = client : clients
 removeClient :: Client -> ServerState -> ServerState
 removeClient client = filter ((/= fst client) . fst)
 
-broadcastReload :: ServerState -> IO ()
-broadcastReload clients = do
-    forM_ clients $ \(_, conn) -> WS.sendTextData conn ("reload" :: T.Text)
+broadcastEvent :: T.Text -> ServerState -> IO ()
+broadcastEvent eventName clients = do
+    forM_ clients $ \(_, conn) -> WS.sendTextData conn eventName
 
 main :: IO ()
 main = do
@@ -94,6 +94,7 @@ reverseProxy proxyHost proxyPort state manager = RP.waiProxyToSettings getDest s
     getDest :: Network.Wai.Request -> IO RP.WaiProxyResponse
     getDest req
         | Network.Wai.pathInfo req == ["__reload"] = return $ RP.WPRApplication (reloadHandler state)
+        | Network.Wai.pathInfo req == ["__reload_css"] = return $ RP.WPRApplication (reloadCSSHandler state)
         | otherwise = return $ RP.WPRProxyDest (RP.ProxyDest (fromString proxyHost) proxyPort)
     settings :: RP.WaiProxySettings
     settings = RP.def { RP.wpsProcessBody = processBody }
@@ -104,8 +105,13 @@ reverseProxy proxyHost proxyPort state manager = RP.waiProxyToSettings getDest s
 
 reloadHandler :: MVar ServerState -> Network.Wai.Application
 reloadHandler state _ respond = do
-    readMVar state >>= broadcastReload
+    readMVar state >>= broadcastEvent "reload"
     respond $ Network.Wai.responseLBS status200 [] "Triggered Reload"
+
+reloadCSSHandler :: MVar ServerState -> Network.Wai.Application
+reloadCSSHandler state _ respond = do
+    readMVar state >>= broadcastEvent "reload_css"
+    respond $ Network.Wai.responseLBS status200 [] "Triggered CSS Reload"
 
 script :: BS.ByteString
 script = $(embedFile "src/script.js")
